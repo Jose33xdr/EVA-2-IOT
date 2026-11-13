@@ -1,4 +1,4 @@
-# SmartGarden
+# EVA-2-IOT
 
 Aplicación Android para monitoreo y control de riego/ventilación de plantas (IoT).
 Proyecto de la Unidad 2 — Aplicaciones Móviles Android.

@@ -21,6 +21,21 @@ class AuthViewModel : ViewModel() {
         const val MAX_INTENTOS = 3
     }
 
+    private fun traducirErrorAuth(e: Exception?): String {
+        val msg = e?.localizedMessage ?: "Error desconocido"
+        return when {
+            msg.contains("password", ignoreCase = true) || msg.contains("credential", ignoreCase = true) || msg.contains("INVALID_LOGIN_CREDENTIALS", ignoreCase = true) ->
+                "Contraseña incorrecta o credenciales inválidas."
+            msg.contains("no user record", ignoreCase = true) || msg.contains("user-not-found", ignoreCase = true) ->
+                "No existe una cuenta registrada con este correo."
+            msg.contains("network", ignoreCase = true) ->
+                "Error de red. Verifica tu conexión a internet."
+            msg.contains("blocked", ignoreCase = true) || msg.contains("disabled", ignoreCase = true) ->
+                "Esta cuenta ha sido desactivada por un administrador."
+            else -> msg
+        }
+    }
+
     // ---------- VALIDACIÓN DE CONTRASEÑA SEGURA ----------
     fun validarPasswordSegura(password: String): String? {
         if (password.length < 8) return "Debe tener al menos 8 caracteres"
@@ -57,26 +72,23 @@ class AuthViewModel : ViewModel() {
                 )
                 db.collection("usuarios").document(uid).set(datosUsuario)
                     .addOnSuccessListener {
-                        // Registramos el evento ANTES de cerrar sesión (aún hay usuario autenticado)
                         Registro.log(
                             tipo = "CUENTA_CREADA",
                             descripcion = "Cuenta creada: $email",
                             uid = uid,
                             email = email,
                             onListo = {
-                                // Cerramos la sesión automática que crea Firebase al registrar,
-                                // para que el usuario inicie sesión explícitamente después.
                                 auth.signOut()
                                 uiState = uiState.copy(cargando = false, registroExitoso = true)
                             }
                         )
                     }
                     .addOnFailureListener { e ->
-                        uiState = uiState.copy(cargando = false, mensajeError = e.localizedMessage)
+                        uiState = uiState.copy(cargando = false, mensajeError = traducirErrorAuth(e))
                     }
             }
             .addOnFailureListener { e ->
-                uiState = uiState.copy(cargando = false, mensajeError = e.localizedMessage)
+                uiState = uiState.copy(cargando = false, mensajeError = traducirErrorAuth(e))
             }
     }
 
@@ -84,6 +96,51 @@ class AuthViewModel : ViewModel() {
     fun login(email: String, password: String) {
         uiState = uiState.copy(cargando = true, mensajeError = null)
         val emailKey = email.trim().lowercase()
+
+        // Si es el admin por defecto, garantizamos que funcione con Inacap.2030
+        if (emailKey == "admin@gmail.com" && password == "Inacap.2030") {
+            db.collection("intentosLogin").document(emailKey)
+                .set(mapOf("intentosFallidos" to 0L, "bloqueadoHasta" to 0L))
+                .addOnCompleteListener {
+                    auth.signInWithEmailAndPassword(email, password)
+                        .addOnSuccessListener { result ->
+                            val uid = result.user?.uid ?: ""
+                            db.collection("usuarios").document(uid).set(
+                                mapOf(
+                                    "email" to email,
+                                    "rol" to "admin",
+                                    "activo" to true,
+                                    "fechaRegistro" to System.currentTimeMillis()
+                                ),
+                                com.google.firebase.firestore.SetOptions.merge()
+                            ).addOnSuccessListener {
+                                Registro.log("LOGIN", "Inicio de sesión Admin")
+                                uiState = uiState.copy(cargando = false, loginExitoso = true)
+                            }
+                        }
+                        .addOnFailureListener {
+                            auth.createUserWithEmailAndPassword(email, password)
+                                .addOnSuccessListener { result ->
+                                    val uid = result.user?.uid ?: ""
+                                    db.collection("usuarios").document(uid).set(
+                                        mapOf(
+                                            "email" to email,
+                                            "rol" to "admin",
+                                            "activo" to true,
+                                            "fechaRegistro" to System.currentTimeMillis()
+                                        )
+                                    ).addOnSuccessListener {
+                                        Registro.log("LOGIN", "Creación e inicio de sesión Admin por defecto")
+                                        uiState = uiState.copy(cargando = false, loginExitoso = true)
+                                    }
+                                }
+                                .addOnFailureListener { eCrear ->
+                                    uiState = uiState.copy(cargando = false, mensajeError = traducirErrorAuth(eCrear))
+                                }
+                        }
+                }
+            return
+        }
 
         db.collection("intentosLogin").document(emailKey).get()
             .addOnSuccessListener { doc ->
@@ -124,7 +181,7 @@ class AuthViewModel : ViewModel() {
                             }
                             .addOnFailureListener { e ->
                                 auth.signOut()
-                                uiState = uiState.copy(cargando = false, mensajeError = e.localizedMessage)
+                                uiState = uiState.copy(cargando = false, mensajeError = traducirErrorAuth(e))
                             }
                     }
                     .addOnFailureListener {
@@ -132,7 +189,7 @@ class AuthViewModel : ViewModel() {
                     }
             }
             .addOnFailureListener { e ->
-                uiState = uiState.copy(cargando = false, mensajeError = e.localizedMessage)
+                uiState = uiState.copy(cargando = false, mensajeError = traducirErrorAuth(e))
             }
     }
 
@@ -164,7 +221,7 @@ class AuthViewModel : ViewModel() {
     fun recuperarPassword(email: String) {
         val emailKey = email.trim().lowercase()
         if (emailKey.isBlank()) {
-            uiState = uiState.copy(mensajeError = "Ingresa tu correo para recuperar la contraseña")
+            uiState = uiState.copy(mensajeError = "Ingresa tu correo electrónico arriba para recuperar la contraseña")
             return
         }
         uiState = uiState.copy(cargando = true, mensajeError = null)
@@ -180,11 +237,11 @@ class AuthViewModel : ViewModel() {
                         )
                     }
                     .addOnFailureListener { e ->
-                        uiState = uiState.copy(cargando = false, mensajeError = e.localizedMessage)
+                        uiState = uiState.copy(cargando = false, mensajeError = traducirErrorAuth(e))
                     }
             }
             .addOnFailureListener { e ->
-                uiState = uiState.copy(cargando = false, mensajeError = e.localizedMessage)
+                uiState = uiState.copy(cargando = false, mensajeError = traducirErrorAuth(e))
             }
     }
 

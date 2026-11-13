@@ -1,5 +1,6 @@
 package com.app.smartgarden.home
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -9,12 +10,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AdminPanelSettings
+import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import android.widget.Toast
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -30,6 +31,7 @@ fun HomeScreen(
     homeViewModel: HomeViewModel = viewModel(),
     onPlantaSeleccionada: (String) -> Unit,
     onAbrirAdmin: () -> Unit,
+    onAbrirConexion: () -> Unit,
     onCerrarSesion: () -> Unit
 ) {
     val uiState = homeViewModel.uiState
@@ -55,6 +57,14 @@ fun HomeScreen(
                     )
                 },
                 actions = {
+                    // Botón para acceder al apartado de conexión Arduino / ESP32 (Wi-Fi y Bluetooth)
+                    IconButton(onClick = onAbrirConexion) {
+                        Icon(
+                            imageVector = Icons.Filled.Bluetooth,
+                            contentDescription = "Conexión Arduino / ESP32",
+                            tint = AccentGreen
+                        )
+                    }
                     // Solo los administradores ven el acceso al panel de administración
                     if (uiState.esAdmin) {
                         IconButton(onClick = onAbrirAdmin) {

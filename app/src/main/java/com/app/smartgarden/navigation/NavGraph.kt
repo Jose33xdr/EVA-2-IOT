@@ -16,20 +16,20 @@ import com.app.smartgarden.admin.AdminRegistrosScreen
 import com.app.smartgarden.admin.AdminScreen
 import com.app.smartgarden.admin.AdminSensoresScreen
 import com.app.smartgarden.auth.LoginScreen
-import com.app.smartgarden.auth.RegisterScreen
+import com.app.smartgarden.conexion.ConexionScreen
 import com.app.smartgarden.home.HomeScreen
 import com.app.smartgarden.home.PlantaDetalleScreen
 import com.google.firebase.auth.FirebaseAuth
 
 object Rutas {
     const val LOGIN = "login"
-    const val REGISTRO = "registro"
     const val HOME = "home"
     const val DETALLE_PLANTA = "detalle/{plantaId}?owner={owner}"
     const val ADMIN = "admin"
     const val ADMIN_PLANTAS = "admin/plantas/{uid}"
     const val ADMIN_REGISTROS = "admin/registros"
     const val ADMIN_SENSORES = "admin/sensores"
+    const val CONEXION = "conexion"
 
     // owner = uid del dueño; solo se usa cuando un administrador abre la planta de otro usuario
     fun detalleConId(plantaId: String, owner: String? = null) =
@@ -68,22 +68,6 @@ fun NavGraph() {
                     navController.navigate(Rutas.HOME) {
                         popUpTo(Rutas.LOGIN) { inclusive = true }
                     }
-                },
-                onIrARegistro = {
-                    navController.navigate(Rutas.REGISTRO)
-                }
-            )
-        }
-
-        composable(Rutas.REGISTRO) {
-            RegisterScreen(
-                onRegistroExitoso = {
-                    navController.navigate(Rutas.LOGIN) {
-                        popUpTo(Rutas.REGISTRO) { inclusive = true }
-                    }
-                },
-                onVolverALogin = {
-                    navController.popBackStack()
                 }
             )
         }
@@ -96,11 +80,20 @@ fun NavGraph() {
                 onAbrirAdmin = {
                     navController.navigate(Rutas.ADMIN)
                 },
+                onAbrirConexion = {
+                    navController.navigate(Rutas.CONEXION)
+                },
                 onCerrarSesion = {
                     navController.navigate(Rutas.LOGIN) {
                         popUpTo(Rutas.HOME) { inclusive = true }
                     }
                 }
+            )
+        }
+
+        composable(Rutas.CONEXION) {
+            ConexionScreen(
+                onVolver = { navController.popBackStack() }
             )
         }
 

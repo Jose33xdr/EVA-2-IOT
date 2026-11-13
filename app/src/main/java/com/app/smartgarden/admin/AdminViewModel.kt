@@ -37,7 +37,27 @@ class AdminViewModel : ViewModel() {
     val uidActual: String? get() = auth.currentUser?.uid
 
     init {
+        asegurarPerfilAdmin()
         observarUsuarios()
+    }
+
+    private fun asegurarPerfilAdmin() {
+        val user = auth.currentUser ?: return
+        if (user.email?.lowercase() == "admin@gmail.com") {
+            db.collection("usuarios").document(user.uid).get()
+                .addOnSuccessListener { doc ->
+                    if (!doc.exists()) {
+                        db.collection("usuarios").document(user.uid).set(
+                            mapOf(
+                                "email" to "admin@gmail.com",
+                                "rol" to "admin",
+                                "activo" to true,
+                                "fechaRegistro" to System.currentTimeMillis()
+                            )
+                        )
+                    }
+                }
+        }
     }
 
     // Escucha en tiempo real a TODOS los usuarios registrados
@@ -127,6 +147,208 @@ class AdminViewModel : ViewModel() {
             }
             .addOnFailureListener { e ->
                 uiState = uiState.copy(mensajeError = e.localizedMessage)
+            }
+    }
+
+    // Crea un usuario nuevo usando una app secundaria de Firebase para no cerrar la sesión del admin
+    fun crearUsuario(email: String, password: String, rol: String, context: android.content.Context, onExito: () -> Unit) {
+        val errorPassword = com.app.smartgarden.auth.AuthViewModel().validarPasswordSegura(password)
+        if (email.isBlank() || !email.contains("@")) {
+            uiState = uiState.copy(mensajeError = "Correo electrónico inválido")
+            return
+        }
+        if (errorPassword != null) {
+            uiState = uiState.copy(mensajeError = errorPassword)
+            return
+        }
+        if (rol != "usuario" && rol != "admin") {
+            uiState = uiState.copy(mensajeError = "Rol inválido")
+            return
+        }
+
+        uiState = uiState.copy(cargando = true, mensajeError = null, mensajeInfo = null)
+
+        try {
+            val currentApp = com.google.firebase.FirebaseApp.getInstance()
+            val secondaryApp = try {
+                com.google.firebase.FirebaseApp.getInstance("TempAuthApp")
+            } catch (e: Exception) {
+                com.google.firebase.FirebaseApp.initializeApp(context, currentApp.options, "TempAuthApp")
+            }
+            val secondaryAuth = FirebaseAuth.getInstance(secondaryApp)
+            secondaryAuth.createUserWithEmailAndPassword(email.trim(), password)
+                .addOnSuccessListener { result ->
+                    val uid = result.user?.uid ?: return@addOnSuccessListener
+                    val datosUsuario = hashMapOf(
+                        "email" to email.trim(),
+                        "fechaRegistro" to System.currentTimeMillis(),
+                        "rol" to rol,
+                        "activo" to true
+                    )
+                    val secondaryDb = FirebaseFirestore.getInstance(secondaryApp)
+                    secondaryDb.collection("usuarios").document(uid).set(datosUsuario)
+                        .addOnSuccessListener {
+                            secondaryAuth.signOut()
+                            Registro.log(
+                                tipo = "CUENTA_CREADA",
+                                descripcion = "Cuenta creada por admin: ${email.trim()} (rol: $rol)",
+                                uidAfectado = uid,
+                                emailAfectado = email.trim()
+                            )
+                            uiState = uiState.copy(cargando = false, mensajeInfo = "Usuario creado exitosamente")
+                            onExito()
+                        }
+                        .addOnFailureListener { e ->
+                            secondaryAuth.signOut()
+                            uiState = uiState.copy(cargando = false, mensajeError = e.localizedMessage)
+                        }
+                }
+                .addOnFailureListener { e ->
+                    secondaryAuth.signOut()
+                    val msg = e.localizedMessage ?: ""
+                    val mensajeAmigable = if (msg.contains("email-already-in-use", ignoreCase = true) || msg.contains("already in use", ignoreCase = true)) {
+                        "Este correo ya está registrado en Firebase Auth. Prueba con otro correo distinto."
+                    } else {
+                        msg
+                    }
+                    uiState = uiState.copy(cargando = false, mensajeError = mensajeAmigable)
+                }
+        } catch (e: Exception) {
+            uiState = uiState.copy(cargando = false, mensajeError = e.localizedMessage)
+        }
+    }
+
+    // Edita los datos de un usuario (email, rol, activo)
+    fun editarUsuario(uid: String, nuevoEmail: String, nuevoRol: String, nuevoActivo: Boolean) {
+        if (nuevoEmail.isBlank() || !nuevoEmail.contains("@")) {
+            uiState = uiState.copy(mensajeError = "Correo electrónico inválido")
+            return
+        }
+        if (nuevoRol != "usuario" && nuevoRol != "admin") return
+        if (uid == uidActual && !nuevoActivo) {
+            uiState = uiState.copy(mensajeError = "No puedes desactivar tu propia cuenta de administrador")
+            return
+        }
+        if (uid == uidActual && nuevoRol != "admin") {
+            uiState = uiState.copy(mensajeError = "No puedes quitarte el rol de administrador a ti mismo")
+            return
+        }
+
+        uiState = uiState.copy(mensajeError = null, mensajeInfo = null)
+
+        val updates = mapOf(
+            "email" to nuevoEmail.trim(),
+            "rol" to nuevoRol,
+            "activo" to nuevoActivo
+        )
+
+        db.collection("usuarios").document(uid)
+            .update(updates)
+            .addOnSuccessListener {
+                Registro.log(
+                    "ROL",
+                    "Usuario editado: ${nuevoEmail.trim()} (rol: $nuevoRol, activo: $nuevoActivo)",
+                    uidAfectado = uid,
+                    emailAfectado = nuevoEmail.trim()
+                )
+                uiState = uiState.copy(mensajeInfo = "Usuario actualizado correctamente")
+            }
+            .addOnFailureListener { e ->
+                uiState = uiState.copy(mensajeError = e.localizedMessage)
+            }
+    }
+
+    // Elimina un usuario y todas sus plantas y libera sus sensores asociados
+    fun eliminarUsuario(usuario: UsuarioAdmin) {
+        if (usuario.uid == uidActual) {
+            uiState = uiState.copy(mensajeError = "No puedes eliminar tu propia cuenta de administrador")
+            return
+        }
+
+        uiState = uiState.copy(cargando = true, mensajeError = null, mensajeInfo = null)
+
+        db.collection("usuarios").document(usuario.uid).collection("plantas").get()
+            .addOnSuccessListener { snapshot ->
+                val batch = db.batch()
+                for (doc in snapshot.documents) {
+                    val sensorId = doc.getString("sensorId")
+                    if (!sensorId.isNullOrBlank()) {
+                        db.collection("sensores").document(sensorId)
+                            .update(mapOf("asignado" to false, "plantaId" to null, "uidDuenoPlanta" to null))
+                    }
+                    batch.delete(doc.reference)
+                }
+                batch.delete(db.collection("usuarios").document(usuario.uid))
+
+                batch.commit()
+                    .addOnSuccessListener {
+                        Registro.log(
+                            "CUENTA_ELIMINADA",
+                            "Usuario eliminado por administrador: ${usuario.email}",
+                            uidAfectado = usuario.uid,
+                            emailAfectado = usuario.email
+                        )
+                        uiState = uiState.copy(cargando = false, mensajeInfo = "Usuario ${usuario.email} eliminado")
+                    }
+                    .addOnFailureListener { e ->
+                        uiState = uiState.copy(cargando = false, mensajeError = e.localizedMessage)
+                    }
+            }
+            .addOnFailureListener { e ->
+                uiState = uiState.copy(mensajeError = e.localizedMessage)
+            }
+    }
+
+    // Elimina todos los usuarios excepto el administrador actual (admin@gmail.com)
+    fun eliminarTodosLosUsuariosExceptoAdmin() {
+        uiState = uiState.copy(cargando = true, mensajeError = null, mensajeInfo = null)
+        db.collection("usuarios").get()
+            .addOnSuccessListener { snapshot ->
+                val batch = db.batch()
+                val tasks = mutableListOf<com.google.android.gms.tasks.Task<*>>()
+
+                for (doc in snapshot.documents) {
+                    val uid = doc.id
+                    val email = doc.getString("email") ?: ""
+                    if (uid == uidActual || email.lowercase() == "admin@gmail.com") continue
+
+                    val plantasTask = db.collection("usuarios").document(uid).collection("plantas").get()
+                        .addOnSuccessListener { plantasSnap ->
+                            for (plantaDoc in plantasSnap.documents) {
+                                val sensorId = plantaDoc.getString("sensorId")
+                                if (!sensorId.isNullOrBlank()) {
+                                    db.collection("sensores").document(sensorId)
+                                        .update(mapOf("asignado" to false, "plantaId" to null, "uidDuenoPlanta" to null))
+                                }
+                                batch.delete(plantaDoc.reference)
+                            }
+                        }
+                    tasks.add(plantasTask)
+                    batch.delete(doc.reference)
+                }
+
+                com.google.android.gms.tasks.Tasks.whenAllComplete(tasks)
+                    .addOnSuccessListener {
+                        batch.commit()
+                            .addOnSuccessListener {
+                                Registro.log(
+                                    "CUENTA_ELIMINADA",
+                                    "Todos los usuarios de prueba fueron eliminados por el administrador",
+                                    uidAfectado = "todos",
+                                    emailAfectado = "varios"
+                                )
+                                uiState = uiState.copy(cargando = false, mensajeInfo = "Todos los usuarios de prueba fueron eliminados")
+                            }
+                            .addOnFailureListener { e ->
+                                uiState = uiState.copy(cargando = false, mensajeError = e.localizedMessage)
+                            }
+                    }
+                    .addOnFailureListener { e ->
+                        uiState = uiState.copy(cargando = false, mensajeError = e.localizedMessage)
+                    }
+            }
+            .addOnFailureListener { e ->
+                uiState = uiState.copy(cargando = false, mensajeError = e.localizedMessage)
             }
     }
 

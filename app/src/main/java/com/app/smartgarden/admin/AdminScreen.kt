@@ -6,12 +6,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -30,7 +32,12 @@ fun AdminScreen(
     onVolver: () -> Unit
 ) {
     val uiState = adminViewModel.uiState
-    var usuarioParaCambiar by remember { mutableStateOf<UsuarioAdmin?>(null) }
+    val context = LocalContext.current
+
+    var usuarioParaEditar by remember { mutableStateOf<UsuarioAdmin?>(null) }
+    var usuarioParaEliminar by remember { mutableStateOf<UsuarioAdmin?>(null) }
+    var mostrarDialogoCrear by remember { mutableStateOf(false) }
+    var mostrarDialogoEliminarTodos by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -55,6 +62,18 @@ fun AdminScreen(
                 )
             )
         },
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = { mostrarDialogoCrear = true },
+                containerColor = AccentGreen,
+                contentColor = MaterialTheme.colorScheme.onPrimary
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Add,
+                    contentDescription = "Agregar usuario"
+                )
+            }
+        },
         containerColor = MaterialTheme.colorScheme.background
     ) { paddingValues ->
 
@@ -77,7 +96,7 @@ fun AdminScreen(
                     item {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Button(
                                 onClick = onVerRegistros,
@@ -95,6 +114,14 @@ fun AdminScreen(
                             ) {
                                 Text("Sensores")
                             }
+                            Button(
+                                onClick = { mostrarDialogoEliminarTodos = true },
+                                modifier = Modifier.weight(1f),
+                                shape = MaterialTheme.shapes.medium,
+                                colors = ButtonDefaults.buttonColors(containerColor = ErrorRed)
+                            ) {
+                                Text("Borrar todos", color = MaterialTheme.colorScheme.onError)
+                            }
                         }
                     }
 
@@ -111,7 +138,8 @@ fun AdminScreen(
                         TarjetaUsuario(
                             usuario = usuario,
                             esYo = usuario.uid == adminViewModel.uidActual,
-                            onCambiarRol = { usuarioParaCambiar = usuario },
+                            onEditar = { usuarioParaEditar = usuario },
+                            onEliminar = { usuarioParaEliminar = usuario },
                             onVerPlantas = { onVerPlantas(usuario.uid) },
                             onToggleActivo = { adminViewModel.cambiarActivo(usuario.uid, !usuario.activo) },
                             onRestablecer = { adminViewModel.enviarRestablecimiento(usuario) }
@@ -144,25 +172,161 @@ fun AdminScreen(
         }
     }
 
-    // Confirmación antes de cambiar el rol de alguien
-    usuarioParaCambiar?.let { usuario ->
-        val nuevoRol = if (usuario.rol == "admin") "usuario" else "admin"
+    // Diálogo para Crear Usuario
+    if (mostrarDialogoCrear) {
+        var email by remember { mutableStateOf("") }
+        var password by remember { mutableStateOf("") }
+        var rol by remember { mutableStateOf("usuario") }
+
         AlertDialog(
-            onDismissRequest = { usuarioParaCambiar = null },
+            onDismissRequest = { mostrarDialogoCrear = false },
             containerColor = MaterialTheme.colorScheme.background,
             shape = RoundedCornerShape(20.dp),
             title = {
                 Text(
-                    text = if (nuevoRol == "admin") "Dar permisos de administrador" else "Quitar permisos de administrador",
+                    text = "Crear Nuevo Usuario",
+                    style = MaterialTheme.typography.titleLarge
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(
+                        value = email,
+                        onValueChange = { email = it },
+                        label = { Text("Correo electrónico") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = { password = it },
+                        label = { Text("Contraseña (mín. 8 caracteres, Mayús, mín., núm., símbolo)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text("Rol:", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = rol == "usuario",
+                            onClick = { rol = "usuario" },
+                            label = { Text("Usuario") }
+                        )
+                        FilterChip(
+                            selected = rol == "admin",
+                            onClick = { rol = "admin" },
+                            label = { Text("Administrador") }
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        adminViewModel.crearUsuario(email, password, rol, context) {
+                            mostrarDialogoCrear = false
+                        }
+                    },
+                    shape = MaterialTheme.shapes.medium,
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen)
+                ) {
+                    Text("Crear")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { mostrarDialogoCrear = false }) {
+                    Text("Cancelar", color = TextSecondary)
+                }
+            }
+        )
+    }
+
+    // Diálogo para Editar Usuario
+    usuarioParaEditar?.let { usuario ->
+        var email by remember { mutableStateOf(usuario.email) }
+        var rol by remember { mutableStateOf(usuario.rol) }
+        var activo by remember { mutableStateOf(usuario.activo) }
+
+        AlertDialog(
+            onDismissRequest = { usuarioParaEditar = null },
+            containerColor = MaterialTheme.colorScheme.background,
+            shape = RoundedCornerShape(20.dp),
+            title = {
+                Text(
+                    text = "Editar Usuario",
+                    style = MaterialTheme.typography.titleLarge
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(
+                        value = email,
+                        onValueChange = { email = it },
+                        label = { Text("Correo electrónico") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text("Rol:", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = rol == "usuario",
+                            onClick = { rol = "usuario" },
+                            label = { Text("Usuario") }
+                        )
+                        FilterChip(
+                            selected = rol == "admin",
+                            onClick = { rol = "admin" },
+                            label = { Text("Administrador") }
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Cuenta activa", style = MaterialTheme.typography.bodyMedium)
+                        Switch(
+                            checked = activo,
+                            onCheckedChange = { activo = it },
+                            colors = SwitchDefaults.colors(checkedThumbColor = AccentGreen)
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        adminViewModel.editarUsuario(usuario.uid, email, rol, activo)
+                        usuarioParaEditar = null
+                    },
+                    shape = MaterialTheme.shapes.medium,
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen)
+                ) {
+                    Text("Guardar")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { usuarioParaEditar = null }) {
+                    Text("Cancelar", color = TextSecondary)
+                }
+            }
+        )
+    }
+
+    // Diálogo para Eliminar Usuario
+    usuarioParaEliminar?.let { usuario ->
+        AlertDialog(
+            onDismissRequest = { usuarioParaEliminar = null },
+            containerColor = MaterialTheme.colorScheme.background,
+            shape = RoundedCornerShape(20.dp),
+            title = {
+                Text(
+                    text = "Eliminar Usuario",
                     style = MaterialTheme.typography.titleLarge
                 )
             },
             text = {
                 Text(
-                    text = if (nuevoRol == "admin")
-                        "${usuario.email} podrá gestionar todos los usuarios, plantas y sensores."
-                    else
-                        "${usuario.email} volverá a ser un usuario normal y solo verá sus propias plantas.",
+                    text = "¿Estás seguro de que deseas eliminar permanentemente a ${usuario.email}? Se eliminarán todas sus plantas y registros asociados.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = TextSecondary
                 )
@@ -170,19 +334,56 @@ fun AdminScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        adminViewModel.cambiarRol(usuario.uid, nuevoRol)
-                        usuarioParaCambiar = null
+                        adminViewModel.eliminarUsuario(usuario)
+                        usuarioParaEliminar = null
                     },
                     shape = MaterialTheme.shapes.medium,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (nuevoRol == "admin") AccentGreen else ErrorRed
-                    )
+                    colors = ButtonDefaults.buttonColors(containerColor = ErrorRed)
                 ) {
-                    Text("Confirmar")
+                    Text("Eliminar")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { usuarioParaCambiar = null }) {
+                TextButton(onClick = { usuarioParaEliminar = null }) {
+                    Text("Cancelar", color = TextSecondary)
+                }
+            }
+        )
+    }
+
+    // Diálogo para Borrar Todos los Usuarios
+    if (mostrarDialogoEliminarTodos) {
+        AlertDialog(
+            onDismissRequest = { mostrarDialogoEliminarTodos = false },
+            containerColor = MaterialTheme.colorScheme.background,
+            shape = RoundedCornerShape(20.dp),
+            title = {
+                Text(
+                    text = "Borrar todos los usuarios",
+                    style = MaterialTheme.typography.titleLarge
+                )
+            },
+            text = {
+                Text(
+                    text = "¿Estás seguro de que deseas eliminar todos los usuarios de prueba y sus plantas? La cuenta de admin@gmail.com se mantendrá intacta.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextSecondary
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        adminViewModel.eliminarTodosLosUsuariosExceptoAdmin()
+                        mostrarDialogoEliminarTodos = false
+                    },
+                    shape = MaterialTheme.shapes.medium,
+                    colors = ButtonDefaults.buttonColors(containerColor = ErrorRed)
+                ) {
+                    Text("Eliminar todos")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { mostrarDialogoEliminarTodos = false }) {
                     Text("Cancelar", color = TextSecondary)
                 }
             }
@@ -195,7 +396,8 @@ fun AdminScreen(
 private fun TarjetaUsuario(
     usuario: UsuarioAdmin,
     esYo: Boolean,
-    onCambiarRol: () -> Unit,
+    onEditar: () -> Unit,
+    onEliminar: () -> Unit,
     onVerPlantas: () -> Unit,
     onToggleActivo: () -> Unit,
     onRestablecer: () -> Unit
@@ -261,22 +463,22 @@ private fun TarjetaUsuario(
             TextButton(onClick = onVerPlantas) {
                 Text("Ver plantas", color = AccentGreen)
             }
+            TextButton(onClick = onEditar) {
+                Text("Editar", color = AccentGreen)
+            }
             TextButton(onClick = onRestablecer) {
                 Text("Restablecer contraseña", color = AccentGreen)
             }
-            // Un admin no puede cambiarse el rol ni desactivarse a sí mismo
+            // Un admin no puede desactivarse ni eliminarse a sí mismo
             if (!esYo) {
-                TextButton(onClick = onCambiarRol) {
-                    Text(
-                        text = if (esAdmin) "Quitar administrador" else "Hacer administrador",
-                        color = if (esAdmin) ErrorRed else AccentGreen
-                    )
-                }
                 TextButton(onClick = onToggleActivo) {
                     Text(
-                        text = if (usuario.activo) "Desactivar cuenta" else "Activar cuenta",
+                        text = if (usuario.activo) "Desactivar" else "Activar",
                         color = if (usuario.activo) ErrorRed else AccentGreen
                     )
+                }
+                TextButton(onClick = onEliminar) {
+                    Text("Eliminar", color = ErrorRed)
                 }
             }
         }

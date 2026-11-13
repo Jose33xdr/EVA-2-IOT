@@ -20,8 +20,7 @@ import com.app.smartgarden.ui.theme.TextSecondary
 @Composable
 fun LoginScreen(
     authViewModel: AuthViewModel = viewModel(),
-    onLoginExitoso: () -> Unit,
-    onIrARegistro: () -> Unit
+    onLoginExitoso: () -> Unit
 ) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -151,16 +150,6 @@ fun LoginScreen(
                     fontWeight = FontWeight.SemiBold
                 )
             }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        TextButton(onClick = onIrARegistro) {
-            Text(
-                text = "¿No tienes cuenta? Regístrate",
-                style = MaterialTheme.typography.bodyMedium,
-                color = TextSecondary
-            )
         }
     }
 }
