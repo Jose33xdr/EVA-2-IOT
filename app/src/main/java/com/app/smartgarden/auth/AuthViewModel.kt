@@ -18,7 +18,7 @@ class AuthViewModel : ViewModel() {
         private set
 
     companion object {
-        const val MAX_INTENTOS = 5
+        const val MAX_INTENTOS = 3
     }
 
     // ---------- VALIDACIÓN DE CONTRASEÑA SEGURA ----------
@@ -88,13 +88,11 @@ class AuthViewModel : ViewModel() {
         db.collection("intentosLogin").document(emailKey).get()
             .addOnSuccessListener { doc ->
                 val bloqueadoHasta = doc.getLong("bloqueadoHasta") ?: 0L
-                val ahora = System.currentTimeMillis()
 
-                if (bloqueadoHasta > ahora) {
-                    val minutosRestantes = ((bloqueadoHasta - ahora) / 60000) + 1
+                if (bloqueadoHasta > 0L) {
                     uiState = uiState.copy(
                         cargando = false,
-                        mensajeError = "Cuenta bloqueada. Intenta en $minutosRestantes min o recupera tu contraseña.",
+                        mensajeError = "Cuenta bloqueada por superar los 3 intentos. Utiliza '¿Olvidaste tu contraseña?' para desbloquearla.",
                         mostrarRecuperar = true
                     )
                     return@addOnSuccessListener
@@ -142,12 +140,12 @@ class AuthViewModel : ViewModel() {
         val intentosActuales = (doc.getLong("intentosFallidos") ?: 0L).toInt() + 1
 
         if (intentosActuales >= MAX_INTENTOS) {
-            val bloqueoHasta = System.currentTimeMillis() + (15 * 60 * 1000)
+            val bloqueoHasta = Long.MAX_VALUE
             db.collection("intentosLogin").document(emailKey)
                 .set(mapOf("intentosFallidos" to intentosActuales.toLong(), "bloqueadoHasta" to bloqueoHasta))
             uiState = uiState.copy(
                 cargando = false,
-                mensajeError = "Superaste el máximo de intentos. Cuenta bloqueada 15 min. Recupera tu contraseña si lo necesitas.",
+                mensajeError = "Superaste el máximo de 3 intentos. Cuenta bloqueada. Utiliza '¿Olvidaste tu contraseña?' para desbloquearla.",
                 mostrarRecuperar = true
             )
         } else {
@@ -157,23 +155,36 @@ class AuthViewModel : ViewModel() {
             uiState = uiState.copy(
                 cargando = false,
                 mensajeError = "Credenciales incorrectas. Te quedan $restantes intento(s).",
-                mostrarRecuperar = intentosActuales >= 3
+                mostrarRecuperar = true
             )
         }
     }
 
     // ---------- RECUPERAR CONTRASEÑA ----------
     fun recuperarPassword(email: String) {
-        if (email.isBlank()) {
+        val emailKey = email.trim().lowercase()
+        if (emailKey.isBlank()) {
             uiState = uiState.copy(mensajeError = "Ingresa tu correo para recuperar la contraseña")
             return
         }
-        auth.sendPasswordResetEmail(email)
+        uiState = uiState.copy(cargando = true, mensajeError = null)
+        auth.sendPasswordResetEmail(emailKey)
             .addOnSuccessListener {
-                uiState = uiState.copy(mensajeError = "Se envió un correo de recuperación a $email")
+                db.collection("intentosLogin").document(emailKey)
+                    .set(mapOf("intentosFallidos" to 0L, "bloqueadoHasta" to 0L))
+                    .addOnSuccessListener {
+                        uiState = uiState.copy(
+                            cargando = false,
+                            mensajeError = "Se envió un correo de recuperación a $email. Cuenta desbloqueada.",
+                            mostrarRecuperar = false
+                        )
+                    }
+                    .addOnFailureListener { e ->
+                        uiState = uiState.copy(cargando = false, mensajeError = e.localizedMessage)
+                    }
             }
             .addOnFailureListener { e ->
-                uiState = uiState.copy(mensajeError = e.localizedMessage)
+                uiState = uiState.copy(cargando = false, mensajeError = e.localizedMessage)
             }
     }
 
