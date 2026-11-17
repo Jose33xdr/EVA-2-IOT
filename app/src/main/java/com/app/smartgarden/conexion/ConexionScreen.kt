@@ -1,6 +1,10 @@
 package com.app.smartgarden.conexion
 
+import android.Manifest
 import android.annotation.SuppressLint
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -162,12 +166,10 @@ const char* password = "TU_PASSWORD_WIFI";
 DHT dht(DHTPIN, DHTTYPE);
 
 const int RELAY_BOMBA = 5;
-const int VENTILADOR = 18;
 
 void setup() {
   Serial.begin(115200);
   pinMode(RELAY_BOMBA, OUTPUT);
-  pinMode(VENTILADOR, OUTPUT);
   dht.begin();
 
   WiFi.begin(ssid, password);
@@ -203,6 +205,12 @@ void loop() {
 @SuppressLint("MissingPermission")
 @Composable
 private fun PestanaBluetooth(viewModel: ConexionViewModel, uiState: ConexionUiState) {
+    val permisoLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        viewModel.verificarBluetooth()
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -236,6 +244,50 @@ private fun PestanaBluetooth(viewModel: ConexionViewModel, uiState: ConexionUiSt
             }
         }
 
+        if (uiState.necesitaPermisoBt) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = BackgroundSecondary)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "Se requiere permiso para buscar y conectar dispositivos Bluetooth cercanos.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Button(
+                            onClick = {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                    permisoLauncher.launch(
+                                        arrayOf(
+                                            Manifest.permission.BLUETOOTH_CONNECT,
+                                            Manifest.permission.BLUETOOTH_SCAN
+                                        )
+                                    )
+                                } else {
+                                    permisoLauncher.launch(
+                                        arrayOf(
+                                            Manifest.permission.BLUETOOTH,
+                                            Manifest.permission.BLUETOOTH_ADMIN
+                                        )
+                                    )
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen)
+                        ) {
+                            Text("Conceder permisos de Bluetooth")
+                        }
+                    }
+                }
+            }
+        }
+
         if (uiState.dispositivoConectado == null) {
             item {
                 Text(
@@ -245,7 +297,7 @@ private fun PestanaBluetooth(viewModel: ConexionViewModel, uiState: ConexionUiSt
                 )
             }
 
-            if (uiState.dispositivosVinculados.isEmpty()) {
+            if (uiState.dispositivosVinculados.isEmpty() && !uiState.necesitaPermisoBt) {
                 item {
                     Text(
                         text = "No hay dispositivos Bluetooth vinculados. Vincula tu ESP32 o HC-05 desde los ajustes de Bluetooth de tu teléfono.",
@@ -255,6 +307,11 @@ private fun PestanaBluetooth(viewModel: ConexionViewModel, uiState: ConexionUiSt
                 }
             } else {
                 items(uiState.dispositivosVinculados) { device ->
+                    val nombreDispositivo = try {
+                        device.name ?: "Dispositivo desconocido"
+                    } catch (_: SecurityException) {
+                        "Dispositivo Bluetooth"
+                    }
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
@@ -267,9 +324,9 @@ private fun PestanaBluetooth(viewModel: ConexionViewModel, uiState: ConexionUiSt
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = device.name ?: "Dispositivo desconocido",
+                                    text = nombreDispositivo,
                                     style = MaterialTheme.typography.bodyLarge,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -310,28 +367,6 @@ private fun PestanaBluetooth(viewModel: ConexionViewModel, uiState: ConexionUiSt
                         colors = ButtonDefaults.buttonColors(containerColor = ErrorRed)
                     ) {
                         Text("Bomba OFF")
-                    }
-                }
-            }
-
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Button(
-                        onClick = { viewModel.enviarComandoBluetooth("VENTILADOR_ON") },
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen)
-                    ) {
-                        Text("Ventilador ON")
-                    }
-                    Button(
-                        onClick = { viewModel.enviarComandoBluetooth("VENTILADOR_OFF") },
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(containerColor = ErrorRed)
-                    ) {
-                        Text("Ventilador OFF")
                     }
                 }
             }
@@ -404,7 +439,7 @@ private fun PestanaGuia() {
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "1. Sensor DHT11 / DHT22:\n   • VCC -> 3.3V / 5V\n   • GND -> GND\n   • DATA -> GPIO 4\n\n2. Módulo Relé (Bomba de agua):\n   • VCC -> 5V | GND -> GND | IN -> GPIO 5\n\n3. Ventilador / Módulo MOSFET:\n   • Control -> GPIO 18\n\n4. Bluetooth HC-05:\n   • TXD -> GPIO 16 (RX2)\n   • RXD -> GPIO 17 (TX2)",
+                        text = "1. Sensor DHT11 / DHT22:\n   • VCC -> 3.3V / 5V\n   • GND -> GND\n   • DATA -> GPIO 4\n\n2. Módulo Relé (Bomba de agua):\n   • VCC -> 5V | GND -> GND | IN -> GPIO 5\n\n3. Bluetooth HC-05:\n   • TXD -> GPIO 16 (RX2)\n   • RXD -> GPIO 17 (TX2)",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onBackground
                     )

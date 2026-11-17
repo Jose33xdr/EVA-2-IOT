@@ -211,23 +211,15 @@ class SimulacionService : Service() {
                 uidAfectado = uidDueno
             )
         }
-        if (r.ventilador != planta.ventiladorEncendido) {
-            Registro.logSistema(
-                db,
-                "${planta.nombre}: Ventilador ${if (r.ventilador) "encendido" else "apagado"} automáticamente (temperatura %.1f°C)".format(r.temperatura),
-                plantaId = planta.id,
-                uidAfectado = uidDueno
-            )
-        }
 
         if (r.alertaEstado != planta.alertaEstado) {
             val texto = when (r.alertaEstado) {
                 SimulacionEngine.ALERTA_PENDIENTE ->
-                    "${planta.nombre}: ALERTA de temperatura (%.1f°C ≥ %.0f°C). El usuario tiene 2 min para actuar".format(r.temperatura, planta.alertaUmbral)
+                    "${planta.nombre}: ALERTA de temperatura (%.1f°C ≥ %.0f°C). Requiere atención".format(r.temperatura, planta.alertaUmbral)
                 SimulacionEngine.ALERTA_EMERGENCIA ->
-                    "${planta.nombre}: EMERGENCIA activada por falta de respuesta. Ventiladores de emergencia ON (%.1f°C)".format(r.temperatura)
+                    "${planta.nombre}: EMERGENCIA activada por temperatura crítica (%.1f°C)".format(r.temperatura)
                 else ->
-                    "${planta.nombre}: alerta de temperatura finalizada (%.1f°C)".format(r.temperatura)
+                    "${planta.nombre}: temperatura normalizada (%.1f°C)".format(r.temperatura)
             }
             Registro.logSistema(db, texto, plantaId = planta.id, uidAfectado = uidDueno, tipo = "ALERTA")
         }
@@ -236,11 +228,11 @@ class SimulacionService : Service() {
             mapOf(
                 "temperatura" to r.temperatura,
                 "humedad" to r.humedad,
-                "ventiladorEncendido" to r.ventilador,
+                "ventiladorEncendido" to false,
                 "bombaEncendida" to r.bomba,
                 "alertaEstado" to r.alertaEstado,
                 "alertaInicio" to r.alertaInicio,
-                "ventiladorEmergencia" to r.emergencia,
+                "ventiladorEmergencia" to false,
                 "ultimaActualizacion" to System.currentTimeMillis()
             )
         )
@@ -281,7 +273,7 @@ class SimulacionService : Service() {
         )
         val titulo = if (emergencia) "🚨 EMERGENCIA: ${planta.nombre}" else "⚠️ Alerta de temperatura: ${planta.nombre}"
         val texto = if (emergencia)
-            "No se atendió a tiempo. Ventiladores de emergencia activados (%.1f°C).".format(planta.temperatura)
+            "Temperatura crítica alcanzada (%.1f°C).".format(planta.temperatura)
         else
             "%.1f°C supera el umbral de %.0f°C. Tienes 2 minutos para actuar.".format(planta.temperatura, planta.alertaUmbral)
 
@@ -296,26 +288,26 @@ class SimulacionService : Service() {
             .setVibrate(longArrayOf(0, 500, 250, 500))
             .setContentIntent(abrir)
             .setAutoCancel(true)
-            .apply { if (!emergencia) addAction(0, "Atender (ventilador ON)", atender) }
+            .apply { if (!emergencia) addAction(0, "Atender alerta", atender) }
             .build()
 
         getSystemService(NotificationManager::class.java).notify(idNotif, notif)
     }
 
-    // El usuario toca "Atender" en la notificación: se enciende el ventilador y se evita la emergencia
+    // El usuario toca "Atender" en la notificación
     private fun atenderDesdeNotificacion(ruta: String) {
         val db = dDb ?: return
         db.document(ruta).update(
             mapOf(
                 "alertaEstado" to SimulacionEngine.ALERTA_ATENDIDA,
                 "ventiladorEmergencia" to false,
-                "ventiladorEncendido" to true,
+                "ventiladorEncendido" to false,
                 "ultimaActualizacion" to System.currentTimeMillis()
             )
         )
         Registro.logSistema(
             db,
-            "Alerta de temperatura atendida desde la notificación (ventilador encendido)",
+            "Alerta de temperatura atendida desde la notificación",
             plantaId = ruta.substringAfterLast('/'),
             uidAfectado = ruta.split('/').getOrNull(1),
             tipo = "ALERTA"

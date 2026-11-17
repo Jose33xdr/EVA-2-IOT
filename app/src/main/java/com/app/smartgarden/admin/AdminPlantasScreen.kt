@@ -160,19 +160,18 @@ private fun TarjetaPlantaAdmin(
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = "%.1f °C · %.1f %% · Bomba: %s · Ventilador: %s".format(
+            text = "%.1f °C · %.1f %% · Bomba: %s".format(
                 planta.temperatura,
                 planta.humedad,
-                if (planta.bombaEncendida) "ON" else "OFF",
-                if (planta.ventiladorEncendido) "ON" else "OFF"
+                if (planta.bombaEncendida) "ON" else "OFF"
             ),
             style = MaterialTheme.typography.bodySmall,
             color = TextSecondary
         )
         Text(
-            text = "Umbrales: %.0f °C · %.0f %%  |  Sensor: %s".format(
-                planta.temperaturaUmbral,
+            text = "Umbral humedad: %.0f %%  |  Alerta: %.0f °C  |  Sensor: %s".format(
                 planta.humedadUmbral,
+                planta.alertaUmbral,
                 planta.sensorId ?: "sin asignar"
             ),
             style = MaterialTheme.typography.bodySmall,

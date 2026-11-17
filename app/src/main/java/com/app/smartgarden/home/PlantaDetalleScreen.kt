@@ -140,7 +140,7 @@ fun PlantaDetalleScreen(
 
                         // ---------- LECTURAS ----------
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            TarjetaLectura(Modifier.weight(1f), "🌡️", "Temperatura", "${"%.1f".format(planta.temperatura)}°C", "Umbral: ${"%.0f".format(planta.temperaturaUmbral)}°C")
+                            TarjetaLectura(Modifier.weight(1f), "🌡️", "Temperatura", "${"%.1f".format(planta.temperatura)}°C", "Alerta: ${"%.0f".format(planta.alertaUmbral)}°C")
                             TarjetaLectura(Modifier.weight(1f), "💧", "Humedad", "${"%.1f".format(planta.humedad)}%", "Umbral: ${"%.0f".format(planta.humedadUmbral)}%")
                         }
 
@@ -149,7 +149,7 @@ fun PlantaDetalleScreen(
                         // ---------- MODO AUTOMÁTICO ----------
                         FilaInfo(
                             titulo = "Modo automático",
-                            subtitulo = if (planta.modoAutomatico) "Riega y ventila según umbrales" else "Control manual",
+                            subtitulo = if (planta.modoAutomatico) "Riega automáticamente según umbral" else "Control manual",
                             accion = {
                                 Switch(
                                     checked = planta.modoAutomatico,
@@ -168,50 +168,23 @@ fun PlantaDetalleScreen(
                             textoInactivo = "Bomba apagada"
                         )
 
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        // ---------- ESTADO VENTILADOR ----------
-                        EstadoActuador(
-                            activo = planta.ventiladorEncendido,
-                            textoActivo = "Ventilando ahora",
-                            textoInactivo = "Ventilador apagado"
-                        )
-
                         Spacer(modifier = Modifier.weight(1f))
 
-                        // ---------- BOTONES MANUALES ----------
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Button(
-                                onClick = {
-                                    if (planta.bombaEncendida) detalleViewModel.detenerRiego(plantaId)
-                                    else detalleViewModel.regarAhora(plantaId)
-                                },
-                                enabled = !planta.modoAutomatico,
-                                shape = MaterialTheme.shapes.medium,
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (planta.bombaEncendida) ErrorRed else AccentGreen,
-                                    contentColor = MaterialTheme.colorScheme.onPrimary
-                                ),
-                                modifier = Modifier.weight(1f).height(54.dp)
-                            ) {
-                                Text(if (planta.bombaEncendida) "Detener riego" else "Regar ahora", fontWeight = FontWeight.SemiBold)
-                            }
-
-                            Button(
-                                onClick = {
-                                    if (planta.ventiladorEncendido) detalleViewModel.apagarVentilador(plantaId)
-                                    else detalleViewModel.encenderVentilador(plantaId)
-                                },
-                                enabled = !planta.modoAutomatico,
-                                shape = MaterialTheme.shapes.medium,
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (planta.ventiladorEncendido) ErrorRed else AccentGreen,
-                                    contentColor = MaterialTheme.colorScheme.onPrimary
-                                ),
-                                modifier = Modifier.weight(1f).height(54.dp)
-                            ) {
-                                Text(if (planta.ventiladorEncendido) "Apagar vent." else "Encender vent.", fontWeight = FontWeight.SemiBold)
-                            }
+                        // ---------- BOTÓN MANUAL BOMBA ----------
+                        Button(
+                            onClick = {
+                                if (planta.bombaEncendida) detalleViewModel.detenerRiego(plantaId)
+                                else detalleViewModel.regarAhora(plantaId)
+                            },
+                            enabled = !planta.modoAutomatico,
+                            shape = MaterialTheme.shapes.medium,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (planta.bombaEncendida) ErrorRed else AccentGreen,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            ),
+                            modifier = Modifier.fillMaxWidth().height(54.dp)
+                        ) {
+                            Text(if (planta.bombaEncendida) "Detener riego" else "Regar ahora", fontWeight = FontWeight.SemiBold)
                         }
 
                         if (planta.modoAutomatico) {
@@ -285,7 +258,7 @@ private fun BannerAlerta(planta: Planta, onAtender: () -> Unit) {
         Spacer(modifier = Modifier.height(4.dp))
         Text(
             text = if (emergencia)
-                "No se atendió a tiempo. Los ventiladores de emergencia están a máxima potencia hasta que la temperatura se normalice."
+                "No se atendió a tiempo. Temperatura crítica detectada hasta que se normalice."
             else
                 "La temperatura superó el umbral de alerta (%.0f°C). Tiempo restante para actuar: %02d:%02d".format(
                     planta.alertaUmbral, restanteMs / 60000, (restanteMs / 1000) % 60
@@ -299,7 +272,7 @@ private fun BannerAlerta(planta: Planta, onAtender: () -> Unit) {
             shape = MaterialTheme.shapes.medium,
             colors = ButtonDefaults.buttonColors(containerColor = ErrorRed)
         ) {
-            Text("Atender alerta (encender ventilador)")
+            Text("Atender alerta")
         }
     }
 }
@@ -367,7 +340,6 @@ private fun DialogConfigurarUmbrales(
     onDismiss: () -> Unit
 ) {
     var humedadTexto by remember { mutableStateOf(humedadActual.toString()) }
-    var temperaturaTexto by remember { mutableStateOf(temperaturaActual.toString()) }
     var alertaTexto by remember { mutableStateOf(alertaActual.toString()) }
 
     AlertDialog(
@@ -378,7 +350,7 @@ private fun DialogConfigurarUmbrales(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    "Bajo este % de humedad se activa la bomba. Sobre esta temperatura se activa el ventilador.",
+                    "Bajo este % de humedad se activa la bomba de riego automáticamente.",
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondary
                 )
@@ -392,18 +364,9 @@ private fun DialogConfigurarUmbrales(
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
-                    value = temperaturaTexto,
-                    onValueChange = { temperaturaTexto = it },
-                    label = { Text("Umbral del ventilador (°C)") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    shape = MaterialTheme.shapes.medium,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
                     value = alertaTexto,
                     onValueChange = { alertaTexto = it },
-                    label = { Text("Umbral de ALERTA (°C)") },
+                    label = { Text("Umbral de ALERTA de temperatura (°C)") },
                     supportingText = { Text("Al superarlo suena una alerta; si no la atiendes en 2 min se activa la emergencia") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -416,9 +379,8 @@ private fun DialogConfigurarUmbrales(
             Button(
                 onClick = {
                     val hum = humedadTexto.toDoubleOrNull() ?: humedadActual
-                    val temp = temperaturaTexto.toDoubleOrNull() ?: temperaturaActual
                     val alerta = alertaTexto.toDoubleOrNull() ?: alertaActual
-                    onConfirmar(hum, temp, alerta)
+                    onConfirmar(hum, temperaturaActual, alerta)
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = AccentGreen)
             ) { Text("Guardar") }

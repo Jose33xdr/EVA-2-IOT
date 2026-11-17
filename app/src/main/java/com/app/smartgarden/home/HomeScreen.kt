@@ -242,7 +242,7 @@ private fun TarjetaPlanta(
             if (planta.alertaEstado == "pendiente" || planta.alertaEstado == "emergencia") {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = if (planta.alertaEstado == "emergencia") "🚨 Emergencia: ventiladores a máxima potencia"
+                    text = if (planta.alertaEstado == "emergencia") "🚨 Emergencia: temperatura crítica"
                     else "⚠️ Alerta de temperatura: requiere atención",
                     style = MaterialTheme.typography.bodySmall,
                     fontWeight = FontWeight.SemiBold,

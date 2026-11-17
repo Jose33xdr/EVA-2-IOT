@@ -19,6 +19,7 @@ import java.util.UUID
 data class ConexionUiState(
     val pestanaActiva: Int = 0, // 0: Wi-Fi/Cloud, 1: Bluetooth, 2: Guía
     val bluetoothDisponible: Boolean = false,
+    val necesitaPermisoBt: Boolean = false,
     val dispositivosVinculados: List<BluetoothDevice> = emptyList(),
     val dispositivoConectado: BluetoothDevice? = null,
     val estadoConexionBt: String = "Desconectado",
@@ -29,7 +30,11 @@ data class ConexionUiState(
 
 class ConexionViewModel : ViewModel() {
 
-    private val bluetoothAdapter: BluetoothAdapter? = BluetoothAdapter.getDefaultAdapter()
+    private val bluetoothAdapter: BluetoothAdapter? = try {
+        BluetoothAdapter.getDefaultAdapter()
+    } catch (_: Exception) {
+        null
+    }
     private var bluetoothSocket: BluetoothSocket? = null
     private val SPP_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
 
@@ -48,24 +53,53 @@ class ConexionViewModel : ViewModel() {
     fun verificarBluetooth() {
         val adapter = bluetoothAdapter
         if (adapter == null) {
-            uiState = uiState.copy(bluetoothDisponible = false, mensajeErrorBt = "Bluetooth no soportado en este dispositivo")
+            uiState = uiState.copy(
+                bluetoothDisponible = false,
+                necesitaPermisoBt = false,
+                mensajeErrorBt = "Bluetooth no soportado en este dispositivo"
+            )
             return
         }
-        val vinculado = adapter.bondedDevices?.toList() ?: emptyList()
-        uiState = uiState.copy(
-            bluetoothDisponible = true,
-            dispositivosVinculados = vinculado
-        )
+        try {
+            val vinculado = adapter.bondedDevices?.toList() ?: emptyList()
+            uiState = uiState.copy(
+                bluetoothDisponible = true,
+                necesitaPermisoBt = false,
+                dispositivosVinculados = vinculado,
+                mensajeErrorBt = null
+            )
+        } catch (_: SecurityException) {
+            uiState = uiState.copy(
+                bluetoothDisponible = false,
+                necesitaPermisoBt = true,
+                dispositivosVinculados = emptyList(),
+                mensajeErrorBt = "Se requiere permiso de Dispositivos cercanos (Bluetooth)"
+            )
+        } catch (e: Exception) {
+            uiState = uiState.copy(
+                bluetoothDisponible = false,
+                necesitaPermisoBt = false,
+                dispositivosVinculados = emptyList(),
+                mensajeErrorBt = "Error al verificar Bluetooth: ${e.localizedMessage}"
+            )
+        }
     }
 
     @SuppressLint("MissingPermission")
     fun conectarBluetooth(device: BluetoothDevice) {
-        uiState = uiState.copy(cargandoBt = true, mensajeErrorBt = null, estadoConexionBt = "Conectando a ${device.name ?: device.address}...")
+        val nombre = try {
+            device.name ?: device.address
+        } catch (_: SecurityException) {
+            device.address
+        }
+        uiState = uiState.copy(cargandoBt = true, mensajeErrorBt = null, estadoConexionBt = "Conectando a $nombre...")
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 bluetoothSocket?.close()
                 val socket = device.createRfcommSocketToServiceRecord(SPP_UUID)
-                bluetoothAdapter?.cancelDiscovery()
+                try {
+                    bluetoothAdapter?.cancelDiscovery()
+                } catch (_: SecurityException) {}
                 socket.connect()
                 bluetoothSocket = socket
 
@@ -73,11 +107,19 @@ class ConexionViewModel : ViewModel() {
                     uiState = uiState.copy(
                         cargandoBt = false,
                         dispositivoConectado = device,
-                        estadoConexionBt = "Conectado a ${device.name ?: device.address}",
-                        logsBt = uiState.logsBt + "🔗 Conectado exitosamente a ${device.name ?: device.address}"
+                        estadoConexionBt = "Conectado a $nombre",
+                        logsBt = uiState.logsBt + "🔗 Conectado exitosamente a $nombre"
                     )
                 }
                 escucharBluetooth(socket)
+            } catch (e: SecurityException) {
+                withContext(Dispatchers.Main) {
+                    uiState = uiState.copy(
+                        cargandoBt = false,
+                        estadoConexionBt = "Error de permisos",
+                        mensajeErrorBt = "No se cuenta con el permiso para conectar al dispositivo Bluetooth"
+                    )
+                }
             } catch (e: IOException) {
                 withContext(Dispatchers.Main) {
                     uiState = uiState.copy(

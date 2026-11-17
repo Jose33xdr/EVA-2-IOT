@@ -97,22 +97,6 @@ class PlantaDetalleViewModel : ViewModel() {
             .addOnSuccessListener { registrar("ACCION_MANUAL", "Riego detenido manualmente", plantaId) }
     }
 
-    fun encenderVentilador(plantaId: String) {
-        val uid = uidDueno() ?: return
-        db.collection("usuarios").document(uid)
-            .collection("plantas").document(plantaId)
-            .update(mapOf("ventiladorEncendido" to true, "ultimaActualizacion" to System.currentTimeMillis()))
-            .addOnSuccessListener { registrar("ACCION_MANUAL", "Ventilador encendido manualmente", plantaId) }
-    }
-
-    fun apagarVentilador(plantaId: String) {
-        val uid = uidDueno() ?: return
-        db.collection("usuarios").document(uid)
-            .collection("plantas").document(plantaId)
-            .update("ventiladorEncendido", false)
-            .addOnSuccessListener { registrar("ACCION_MANUAL", "Ventilador apagado manualmente", plantaId) }
-    }
-
     fun actualizarUmbrales(plantaId: String, humedadUmbral: Double, temperaturaUmbral: Double, alertaUmbral: Double) {
         val uid = uidDueno() ?: return
         db.collection("usuarios").document(uid)
@@ -125,11 +109,11 @@ class PlantaDetalleViewModel : ViewModel() {
                 )
             )
             .addOnSuccessListener {
-                registrar("UMBRALES", "Umbrales: humedad %.0f%%, ventilador %.0f°C, alerta %.0f°C".format(humedadUmbral, temperaturaUmbral, alertaUmbral), plantaId)
+                registrar("UMBRALES", "Umbrales: humedad %.0f%%, alerta %.0f°C".format(humedadUmbral, alertaUmbral), plantaId)
             }
     }
 
-    // El usuario atiende la alerta de temperatura: enciende el ventilador y evita la emergencia
+    // El usuario atiende la alerta de temperatura y evita la emergencia
     fun atenderAlerta(plantaId: String) {
         val uid = uidDueno() ?: return
         db.collection("usuarios").document(uid)
@@ -138,12 +122,12 @@ class PlantaDetalleViewModel : ViewModel() {
                 mapOf(
                     "alertaEstado" to "atendida",
                     "ventiladorEmergencia" to false,
-                    "ventiladorEncendido" to true,
+                    "ventiladorEncendido" to false,
                     "ultimaActualizacion" to System.currentTimeMillis()
                 )
             )
             .addOnSuccessListener {
-                registrar("ALERTA", "Alerta de temperatura atendida por el usuario (ventilador encendido)", plantaId)
+                registrar("ALERTA", "Alerta de temperatura atendida por el usuario", plantaId)
             }
     }
 

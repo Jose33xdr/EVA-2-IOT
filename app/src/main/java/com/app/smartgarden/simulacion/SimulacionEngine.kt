@@ -22,13 +22,9 @@ object SimulacionEngine {
     const val ALERTA_ATENDIDA = "atendida"
     const val ALERTA_EMERGENCIA = "emergencia"
 
-    private const val INCREMENTO_TEMP = 0.4    // sube sola si el ventilador está apagado
-    private const val ENFRIAMIENTO_TEMP = 0.8  // baja cuando el ventilador está encendido
-    private const val ENFRIAMIENTO_EMERGENCIA = 2.0 // ventiladores de emergencia: más del doble de potencia
     private const val DECREMENTO_HUM = 1.2     // baja sola si la bomba está apagada
     private const val HUMEDECIMIENTO_HUM = 2.5 // sube cuando la bomba está encendida
 
-    private const val MARGEN_APAGADO_TEMP = 1.5 // cuánto debe bajar la temp para apagar el ventilador
     private const val MARGEN_APAGADO_HUM = 5.0  // cuánto debe subir la humedad para apagar la bomba
     private const val MARGEN_FIN_ALERTA = 2.0   // cuánto debe bajar bajo el umbral de alerta para darla por terminada
 
@@ -50,28 +46,23 @@ object SimulacionEngine {
     fun siguiente(planta: Planta, ahora: Long = System.currentTimeMillis()): Resultado {
         var temp = planta.temperatura
         var hum = planta.humedad
-        var ventilador = planta.ventiladorEncendido
         var bomba = planta.bombaEncendida
 
-        // Deriva natural: sube la temperatura / baja la humedad, salvo que el actuador esté encendido
-        temp += when {
-            planta.ventiladorEmergencia -> -ENFRIAMIENTO_EMERGENCIA
-            ventilador -> -ENFRIAMIENTO_TEMP
-            else -> INCREMENTO_TEMP
+        // Deriva: humedad baja sola si no hay riego; temperatura fluctúa en rango ambiental o baja si se atiende
+        val derivaTemp = when {
+            planta.alertaEstado == ALERTA_ATENDIDA || planta.alertaEstado == ALERTA_EMERGENCIA -> -0.6
+            temp > 25.5 -> -0.2
+            temp < 22.0 -> 0.2
+            else -> listOf(-0.1, 0.0, 0.1).random()
         }
+        temp += derivaTemp
         hum += if (bomba) HUMEDECIMIENTO_HUM else -DECREMENTO_HUM
 
         temp = temp.coerceIn(TEMP_MIN, TEMP_MAX)
         hum = hum.coerceIn(HUM_MIN, HUM_MAX)
 
-        // Solo en modo automático el sistema decide prender/apagar los actuadores
+        // En modo automático se controla la bomba según el umbral de humedad
         if (planta.modoAutomatico) {
-            if (!ventilador && temp >= planta.temperaturaUmbral) {
-                ventilador = true
-            } else if (ventilador && temp <= planta.temperaturaUmbral - MARGEN_APAGADO_TEMP) {
-                ventilador = false
-            }
-
             if (!bomba && hum <= planta.humedadUmbral) {
                 bomba = true
             } else if (bomba && hum >= planta.humedadUmbral + MARGEN_APAGADO_HUM) {
@@ -82,7 +73,7 @@ object SimulacionEngine {
         // ----- Máquina de estados de la alerta -----
         var estado = planta.alertaEstado
         var inicio = planta.alertaInicio
-        var emergencia = planta.ventiladorEmergencia
+        var emergencia = false
         val sobreUmbral = temp >= planta.alertaUmbral
         val normalizada = temp <= planta.alertaUmbral - MARGEN_FIN_ALERTA
 
@@ -96,13 +87,10 @@ object SimulacionEngine {
             else -> if (sobreUmbral) { estado = ALERTA_PENDIENTE; inicio = ahora }
         }
 
-        // En emergencia el ventilador queda encendido a máxima potencia
-        if (emergencia) ventilador = true
-
         return Resultado(
             temperatura = Math.round(temp * 10) / 10.0,   // un decimal, sin ruido de punto flotante
             humedad = Math.round(hum * 10) / 10.0,
-            ventilador = ventilador,
+            ventilador = false,
             bomba = bomba,
             alertaEstado = estado,
             alertaInicio = inicio,
