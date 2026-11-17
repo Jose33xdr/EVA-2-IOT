@@ -244,6 +244,91 @@ private fun PestanaBluetooth(viewModel: ConexionViewModel, uiState: ConexionUiSt
             }
         }
 
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = BackgroundSecondary)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Reconexión automática",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                        Text(
+                            text = if (uiState.reconexionAutomatica)
+                                "Activo: reintentará si se pierde la conexión"
+                            else
+                                "Inactivo: conexión solo manual",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary
+                        )
+                    }
+                    Switch(
+                        checked = uiState.reconexionAutomatica,
+                        onCheckedChange = { viewModel.setReconexionAutomatica(it) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = AccentGreen,
+                            checkedTrackColor = AccentGreen.copy(alpha = 0.5f)
+                        )
+                    )
+                }
+            }
+        }
+
+        if (uiState.reconectandoBt) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = BackgroundSecondary)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                                color = AccentGreen
+                            )
+                            Text(
+                                text = "Reconectando automáticamente...",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = AccentGreen
+                            )
+                        }
+                        Text(
+                            text = uiState.estadoConexionBt,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary
+                        )
+                        OutlinedButton(
+                            onClick = { viewModel.cancelarReconexion() },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = ErrorRed)
+                        ) {
+                            Text("Detener reintentos")
+                        }
+                    }
+                }
+            }
+        }
+
         if (uiState.necesitaPermisoBt) {
             item {
                 Card(

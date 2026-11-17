@@ -4,13 +4,15 @@ import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothSocket
-import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.IOException
@@ -25,7 +27,10 @@ data class ConexionUiState(
     val estadoConexionBt: String = "Desconectado",
     val logsBt: List<String> = emptyList(),
     val cargandoBt: Boolean = false,
-    val mensajeErrorBt: String? = null
+    val mensajeErrorBt: String? = null,
+    val reconexionAutomatica: Boolean = true,
+    val reconectandoBt: Boolean = false,
+    val reintentoActual: Int = 0
 )
 
 class ConexionViewModel : ViewModel() {
@@ -38,6 +43,10 @@ class ConexionViewModel : ViewModel() {
     private var bluetoothSocket: BluetoothSocket? = null
     private val SPP_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
 
+    private var ultimoDispositivo: BluetoothDevice? = null
+    private var desconexionManual: Boolean = false
+    private var reconexionJob: Job? = null
+
     var uiState by mutableStateOf(ConexionUiState())
         private set
 
@@ -47,6 +56,24 @@ class ConexionViewModel : ViewModel() {
 
     fun cambiarPestana(index: Int) {
         uiState = uiState.copy(pestanaActiva = index)
+    }
+
+    fun setReconexionAutomatica(activar: Boolean) {
+        uiState = uiState.copy(reconexionAutomatica = activar)
+        if (!activar) {
+            cancelarReconexion()
+        }
+    }
+
+    fun cancelarReconexion() {
+        reconexionJob?.cancel()
+        reconexionJob = null
+        uiState = uiState.copy(
+            reconectandoBt = false,
+            cargandoBt = false,
+            estadoConexionBt = "Desconectado",
+            logsBt = uiState.logsBt + "⏹️ Reconexión automática detenida por el usuario"
+        )
     }
 
     @SuppressLint("MissingPermission")
@@ -87,12 +114,22 @@ class ConexionViewModel : ViewModel() {
 
     @SuppressLint("MissingPermission")
     fun conectarBluetooth(device: BluetoothDevice) {
+        desconexionManual = false
+        ultimoDispositivo = device
+        reconexionJob?.cancel()
+        reconexionJob = null
+
         val nombre = try {
             device.name ?: device.address
         } catch (_: SecurityException) {
             device.address
         }
-        uiState = uiState.copy(cargandoBt = true, mensajeErrorBt = null, estadoConexionBt = "Conectando a $nombre...")
+        uiState = uiState.copy(
+            cargandoBt = true,
+            reconectandoBt = false,
+            mensajeErrorBt = null,
+            estadoConexionBt = "Conectando a $nombre..."
+        )
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 bluetoothSocket?.close()
@@ -106,6 +143,8 @@ class ConexionViewModel : ViewModel() {
                 withContext(Dispatchers.Main) {
                     uiState = uiState.copy(
                         cargandoBt = false,
+                        reconectandoBt = false,
+                        reintentoActual = 0,
                         dispositivoConectado = device,
                         estadoConexionBt = "Conectado a $nombre",
                         logsBt = uiState.logsBt + "🔗 Conectado exitosamente a $nombre"
@@ -116,6 +155,7 @@ class ConexionViewModel : ViewModel() {
                 withContext(Dispatchers.Main) {
                     uiState = uiState.copy(
                         cargandoBt = false,
+                        reconectandoBt = false,
                         estadoConexionBt = "Error de permisos",
                         mensajeErrorBt = "No se cuenta con el permiso para conectar al dispositivo Bluetooth"
                     )
@@ -125,8 +165,11 @@ class ConexionViewModel : ViewModel() {
                     uiState = uiState.copy(
                         cargandoBt = false,
                         estadoConexionBt = "Error de conexión",
-                        mensajeErrorBt = "No se pudo conectar: ${e.localizedMessage}. Asegúrate de que el ESP32/Arduino esté vinculado y encendido."
+                        mensajeErrorBt = "No se pudo conectar: ${e.localizedMessage}. Asegúrate de que el ESP32 esté encendido."
                     )
+                }
+                if (uiState.reconexionAutomatica && !desconexionManual) {
+                    iniciarReconexionAutomatica(device)
                 }
             }
         }
@@ -148,12 +191,95 @@ class ConexionViewModel : ViewModel() {
                 }
             }
         } catch (e: IOException) {
+            try {
+                socket.close()
+            } catch (_: Exception) {}
+            bluetoothSocket = null
+
+            val dev = ultimoDispositivo
             withContext(Dispatchers.Main) {
                 uiState = uiState.copy(
                     dispositivoConectado = null,
-                    estadoConexionBt = "Desconectado (conexión perdida)",
-                    logsBt = uiState.logsBt + "❌ Conexión perdida"
+                    estadoConexionBt = if (uiState.reconexionAutomatica && !desconexionManual) "Conexión perdida. Reconectando..." else "Desconectado (conexión perdida)",
+                    logsBt = uiState.logsBt + "❌ Conexión perdida con el dispositivo"
                 )
+                if (uiState.reconexionAutomatica && !desconexionManual && dev != null) {
+                    iniciarReconexionAutomatica(dev)
+                }
+            }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun iniciarReconexionAutomatica(device: BluetoothDevice) {
+        reconexionJob?.cancel()
+        val nombre = try {
+            device.name ?: device.address
+        } catch (_: SecurityException) {
+            device.address
+        }
+
+        reconexionJob = viewModelScope.launch(Dispatchers.IO) {
+            var intento = 1
+            while (isActive && uiState.reconexionAutomatica && !desconexionManual) {
+                withContext(Dispatchers.Main) {
+                    uiState = uiState.copy(
+                        cargandoBt = true,
+                        reconectandoBt = true,
+                        reintentoActual = intento,
+                        estadoConexionBt = "Reconectando a $nombre (intento $intento)...",
+                        logsBt = uiState.logsBt + "🔄 Intentando reconectar a $nombre (intento $intento)..."
+                    )
+                }
+
+                delay(3000)
+                if (!isActive || desconexionManual || !uiState.reconexionAutomatica) break
+
+                try {
+                    bluetoothSocket?.close()
+                } catch (_: Exception) {}
+
+                try {
+                    val socket = device.createRfcommSocketToServiceRecord(SPP_UUID)
+                    try {
+                        bluetoothAdapter?.cancelDiscovery()
+                    } catch (_: SecurityException) {}
+
+                    socket.connect()
+                    bluetoothSocket = socket
+
+                    withContext(Dispatchers.Main) {
+                        uiState = uiState.copy(
+                            cargandoBt = false,
+                            reconectandoBt = false,
+                            reintentoActual = 0,
+                            dispositivoConectado = device,
+                            estadoConexionBt = "Conectado a $nombre",
+                            logsBt = uiState.logsBt + "✅ Reconectado exitosamente a $nombre"
+                        )
+                    }
+
+                    escucharBluetooth(socket)
+                    break
+                } catch (e: IOException) {
+                    intento++
+                    withContext(Dispatchers.Main) {
+                        uiState = uiState.copy(
+                            estadoConexionBt = "Fallo en intento. Reintentando en 3s...",
+                            logsBt = uiState.logsBt + "⚠️ Reintento fallido, esperando para volver a intentar..."
+                        )
+                    }
+                } catch (e: SecurityException) {
+                    withContext(Dispatchers.Main) {
+                        uiState = uiState.copy(
+                            cargandoBt = false,
+                            reconectandoBt = false,
+                            estadoConexionBt = "Error de permisos",
+                            mensajeErrorBt = "Permiso Bluetooth revocado"
+                        )
+                    }
+                    break
+                }
             }
         }
     }
@@ -179,11 +305,17 @@ class ConexionViewModel : ViewModel() {
     }
 
     fun desconectarBluetooth() {
+        desconexionManual = true
+        reconexionJob?.cancel()
+        reconexionJob = null
         try {
             bluetoothSocket?.close()
         } catch (_: Exception) {}
         bluetoothSocket = null
         uiState = uiState.copy(
+            cargandoBt = false,
+            reconectandoBt = false,
+            reintentoActual = 0,
             dispositivoConectado = null,
             estadoConexionBt = "Desconectado",
             logsBt = uiState.logsBt + "🔌 Desconectado manualmente"
@@ -192,6 +324,8 @@ class ConexionViewModel : ViewModel() {
 
     override fun onCleared() {
         super.onCleared()
+        desconexionManual = true
+        reconexionJob?.cancel()
         try {
             bluetoothSocket?.close()
         } catch (_: Exception) {}
