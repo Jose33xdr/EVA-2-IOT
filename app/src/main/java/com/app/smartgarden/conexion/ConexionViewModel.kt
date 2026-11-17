@@ -28,6 +28,9 @@ data class ConexionUiState(
     val temperaturaWifi: String = "--",
     val humedadWifi: String = "--",
     val bombaWifiEstado: String = "OFF",
+    val reconexionWifiActiva: Boolean = true,
+    val reconectandoWifi: Boolean = false,
+    val autoActualizarWifi: Boolean = false,
     val bluetoothDisponible: Boolean = false,
     val necesitaPermisoBt: Boolean = false,
     val dispositivosVinculados: List<BluetoothDevice> = emptyList(),
@@ -54,6 +57,7 @@ class ConexionViewModel : ViewModel() {
     private var ultimoDispositivo: BluetoothDevice? = null
     private var desconexionManual: Boolean = false
     private var reconexionJob: Job? = null
+    private var wifiPollJob: Job? = null
 
     var uiState by mutableStateOf(ConexionUiState())
         private set
@@ -70,6 +74,42 @@ class ConexionViewModel : ViewModel() {
         uiState = uiState.copy(ipEsp32 = ip)
     }
 
+    fun setReconexionWifi(activar: Boolean) {
+        uiState = uiState.copy(reconexionWifiActiva = activar)
+        if (!activar) {
+            detenerAutoActualizarWifi()
+        }
+    }
+
+    fun setAutoActualizarWifi(activar: Boolean) {
+        uiState = uiState.copy(autoActualizarWifi = activar)
+        if (activar) {
+            iniciarBucleWifi()
+        } else {
+            detenerAutoActualizarWifi()
+        }
+    }
+
+    private fun iniciarBucleWifi() {
+        wifiPollJob?.cancel()
+        wifiPollJob = viewModelScope.launch(Dispatchers.IO) {
+            while (isActive && uiState.autoActualizarWifi) {
+                conectarYLeerWifiSilencioso()
+                delay(5000)
+            }
+        }
+    }
+
+    fun detenerAutoActualizarWifi() {
+        wifiPollJob?.cancel()
+        wifiPollJob = null
+        uiState = uiState.copy(
+            autoActualizarWifi = false,
+            reconectandoWifi = false,
+            estadoConexionWifi = "Desconectado"
+        )
+    }
+
     fun conectarYLeerWifi() {
         val ip = uiState.ipEsp32.trim()
         if (ip.isBlank()) {
@@ -78,63 +118,78 @@ class ConexionViewModel : ViewModel() {
         }
         uiState = uiState.copy(
             cargandoWifi = true,
+            reconectandoWifi = false,
             mensajeErrorWifi = null,
             estadoConexionWifi = "Conectando a http://$ip/ ..."
         )
         viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val url = java.net.URL("http://$ip/")
-                val connection = (url.openConnection() as java.net.HttpURLConnection).apply {
-                    connectTimeout = 4000
-                    readTimeout = 4000
-                    requestMethod = "GET"
-                }
-                val responseCode = connection.responseCode
-                if (responseCode == java.net.HttpURLConnection.HTTP_OK) {
-                    val responseBody = connection.inputStream.bufferedReader().use { it.readText() }
+            realizarPeticionHttp(ip, silencioso = false)
+        }
+    }
 
-                    var temp = "--"
-                    var hum = "--"
-                    var bomba = "OFF"
+    private suspend fun conectarYLeerWifiSilencioso() {
+        val ip = uiState.ipEsp32.trim()
+        if (ip.isBlank()) return
+        realizarPeticionHttp(ip, silencioso = true)
+    }
 
-                    try {
-                        val tempRegex = "\"temperatura\":\\s*([0-9.]+)".toRegex()
-                        val humRegex = "\"humedad\":\\s*([0-9.]+)".toRegex()
-                        val bombaRegex = "\"bomba\":\\s*\"([^\"]+)\"".toRegex()
+    private suspend fun realizarPeticionHttp(ip: String, silencioso: Boolean) {
+        try {
+            val url = java.net.URL("http://$ip/")
+            val connection = (url.openConnection() as java.net.HttpURLConnection).apply {
+                connectTimeout = 3000
+                readTimeout = 3000
+                requestMethod = "GET"
+            }
+            val responseCode = connection.responseCode
+            if (responseCode == java.net.HttpURLConnection.HTTP_OK) {
+                val responseBody = connection.inputStream.bufferedReader().use { it.readText() }
 
-                        tempRegex.find(responseBody)?.groupValues?.get(1)?.let { temp = "$it °C" }
-                        humRegex.find(responseBody)?.groupValues?.get(1)?.let { hum = "$it %" }
-                        bombaRegex.find(responseBody)?.groupValues?.get(1)?.let { bomba = it }
-                    } catch (_: Exception) {}
+                var temp = "--"
+                var hum = "--"
+                var bomba = "OFF"
 
-                    withContext(Dispatchers.Main) {
-                        uiState = uiState.copy(
-                            cargandoWifi = false,
-                            estadoConexionWifi = "Conectado (HTTP 200)",
-                            temperaturaWifi = temp,
-                            humedadWifi = hum,
-                            bombaWifiEstado = bomba,
-                            logsWifi = uiState.logsWifi + "📥 RX [http://$ip/]: $responseBody"
-                        )
-                    }
-                } else {
-                    withContext(Dispatchers.Main) {
-                        uiState = uiState.copy(
-                            cargandoWifi = false,
-                            estadoConexionWifi = "Error HTTP $responseCode",
-                            mensajeErrorWifi = "El ESP32 respondió con código HTTP $responseCode"
-                        )
-                    }
-                }
-                connection.disconnect()
-            } catch (e: Exception) {
+                try {
+                    val tempRegex = "\"temperatura\":\\s*([0-9.]+)".toRegex()
+                    val humRegex = "\"humedad\":\\s*([0-9.]+)".toRegex()
+                    val bombaRegex = "\"bomba\":\\s*\"([^\"]+)\"".toRegex()
+
+                    tempRegex.find(responseBody)?.groupValues?.get(1)?.let { temp = "$it °C" }
+                    humRegex.find(responseBody)?.groupValues?.get(1)?.let { hum = "$it %" }
+                    bombaRegex.find(responseBody)?.groupValues?.get(1)?.let { bomba = it }
+                } catch (_: Exception) {}
+
                 withContext(Dispatchers.Main) {
                     uiState = uiState.copy(
                         cargandoWifi = false,
-                        estadoConexionWifi = "Error de conexión",
-                        mensajeErrorWifi = "No se pudo conectar a http://$ip/: ${e.localizedMessage}. Verifica que estén en la misma red Wi-Fi y la IP sea correcta."
+                        reconectandoWifi = false,
+                        estadoConexionWifi = "Conectado (HTTP 200)",
+                        temperaturaWifi = temp,
+                        humedadWifi = hum,
+                        bombaWifiEstado = bomba,
+                        mensajeErrorWifi = null,
+                        logsWifi = if (!silencioso) uiState.logsWifi + "📥 RX [http://$ip/]: $responseBody" else uiState.logsWifi
                     )
                 }
+            } else {
+                withContext(Dispatchers.Main) {
+                    uiState = uiState.copy(
+                        cargandoWifi = false,
+                        reconectandoWifi = uiState.reconexionWifiActiva && uiState.autoActualizarWifi,
+                        estadoConexionWifi = if (uiState.reconexionWifiActiva && uiState.autoActualizarWifi) "Conexión perdida. Reconectando..." else "Error HTTP $responseCode",
+                        mensajeErrorWifi = "El ESP32 respondió con código HTTP $responseCode"
+                    )
+                }
+            }
+            connection.disconnect()
+        } catch (e: Exception) {
+            withContext(Dispatchers.Main) {
+                uiState = uiState.copy(
+                    cargandoWifi = false,
+                    reconectandoWifi = uiState.reconexionWifiActiva && uiState.autoActualizarWifi,
+                    estadoConexionWifi = if (uiState.reconexionWifiActiva && uiState.autoActualizarWifi) "Sin señal. Reconectando automáticamente..." else "Error de conexión",
+                    mensajeErrorWifi = if (!silencioso) "No se pudo conectar a http://$ip/: ${e.localizedMessage}" else null
+                )
             }
         }
     }

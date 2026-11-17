@@ -155,6 +155,33 @@ private fun PestanaWifiCloud(viewModel: ConexionViewModel, uiState: ConexionUiSt
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Reconexión y lectura automática",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = if (uiState.autoActualizarWifi) "Activo: reintenta y actualiza cada 5s" else "Inactivo: lectura manual",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary
+                            )
+                        }
+                        Switch(
+                            checked = uiState.autoActualizarWifi,
+                            onCheckedChange = { viewModel.setAutoActualizarWifi(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = AccentGreen,
+                                checkedTrackColor = AccentGreen.copy(alpha = 0.5f)
+                            )
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
