@@ -19,7 +19,15 @@ import java.io.IOException
 import java.util.UUID
 
 data class ConexionUiState(
-    val pestanaActiva: Int = 0, // 0: Wi-Fi/Cloud, 1: Bluetooth, 2: Guía
+    val pestanaActiva: Int = 0, // 0: Wi-Fi IP, 1: Bluetooth, 2: Guía
+    val ipEsp32: String = "192.168.1.50",
+    val estadoConexionWifi: String = "Desconectado",
+    val cargandoWifi: Boolean = false,
+    val mensajeErrorWifi: String? = null,
+    val logsWifi: List<String> = emptyList(),
+    val temperaturaWifi: String = "--",
+    val humedadWifi: String = "--",
+    val bombaWifiEstado: String = "OFF",
     val bluetoothDisponible: Boolean = false,
     val necesitaPermisoBt: Boolean = false,
     val dispositivosVinculados: List<BluetoothDevice> = emptyList(),
@@ -56,6 +64,116 @@ class ConexionViewModel : ViewModel() {
 
     fun cambiarPestana(index: Int) {
         uiState = uiState.copy(pestanaActiva = index)
+    }
+
+    fun setIpEsp32(ip: String) {
+        uiState = uiState.copy(ipEsp32 = ip)
+    }
+
+    fun conectarYLeerWifi() {
+        val ip = uiState.ipEsp32.trim()
+        if (ip.isBlank()) {
+            uiState = uiState.copy(mensajeErrorWifi = "Introduce una dirección IP válida para el ESP32")
+            return
+        }
+        uiState = uiState.copy(
+            cargandoWifi = true,
+            mensajeErrorWifi = null,
+            estadoConexionWifi = "Conectando a http://$ip/ ..."
+        )
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val url = java.net.URL("http://$ip/")
+                val connection = (url.openConnection() as java.net.HttpURLConnection).apply {
+                    connectTimeout = 4000
+                    readTimeout = 4000
+                    requestMethod = "GET"
+                }
+                val responseCode = connection.responseCode
+                if (responseCode == java.net.HttpURLConnection.HTTP_OK) {
+                    val responseBody = connection.inputStream.bufferedReader().use { it.readText() }
+
+                    var temp = "--"
+                    var hum = "--"
+                    var bomba = "OFF"
+
+                    try {
+                        val tempRegex = "\"temperatura\":\\s*([0-9.]+)".toRegex()
+                        val humRegex = "\"humedad\":\\s*([0-9.]+)".toRegex()
+                        val bombaRegex = "\"bomba\":\\s*\"([^\"]+)\"".toRegex()
+
+                        tempRegex.find(responseBody)?.groupValues?.get(1)?.let { temp = "$it °C" }
+                        humRegex.find(responseBody)?.groupValues?.get(1)?.let { hum = "$it %" }
+                        bombaRegex.find(responseBody)?.groupValues?.get(1)?.let { bomba = it }
+                    } catch (_: Exception) {}
+
+                    withContext(Dispatchers.Main) {
+                        uiState = uiState.copy(
+                            cargandoWifi = false,
+                            estadoConexionWifi = "Conectado (HTTP 200)",
+                            temperaturaWifi = temp,
+                            humedadWifi = hum,
+                            bombaWifiEstado = bomba,
+                            logsWifi = uiState.logsWifi + "📥 RX [http://$ip/]: $responseBody"
+                        )
+                    }
+                } else {
+                    withContext(Dispatchers.Main) {
+                        uiState = uiState.copy(
+                            cargandoWifi = false,
+                            estadoConexionWifi = "Error HTTP $responseCode",
+                            mensajeErrorWifi = "El ESP32 respondió con código HTTP $responseCode"
+                        )
+                    }
+                }
+                connection.disconnect()
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    uiState = uiState.copy(
+                        cargandoWifi = false,
+                        estadoConexionWifi = "Error de conexión",
+                        mensajeErrorWifi = "No se pudo conectar a http://$ip/: ${e.localizedMessage}. Verifica que estén en la misma red Wi-Fi y la IP sea correcta."
+                    )
+                }
+            }
+        }
+    }
+
+    fun enviarComandoWifi(endpoint: String, descripcionComando: String) {
+        val ip = uiState.ipEsp32.trim()
+        if (ip.isBlank()) {
+            uiState = uiState.copy(mensajeErrorWifi = "Introduce la IP del ESP32")
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                withContext(Dispatchers.Main) {
+                    uiState = uiState.copy(logsWifi = uiState.logsWifi + "📤 TX [http://$ip/$endpoint]: $descripcionComando")
+                }
+                val url = java.net.URL("http://$ip/$endpoint")
+                val connection = (url.openConnection() as java.net.HttpURLConnection).apply {
+                    connectTimeout = 3000
+                    readTimeout = 3000
+                    requestMethod = "GET"
+                }
+                val responseCode = connection.responseCode
+                val body = try { connection.inputStream.bufferedReader().use { it.readText() } } catch (_: Exception) { "" }
+                connection.disconnect()
+
+                withContext(Dispatchers.Main) {
+                    uiState = uiState.copy(
+                        bombaWifiEstado = if (endpoint.contains("on", ignoreCase = true)) "ON" else if (endpoint.contains("off", ignoreCase = true)) "OFF" else uiState.bombaWifiEstado,
+                        logsWifi = uiState.logsWifi + "📥 Respuesta [$responseCode]: $body"
+                    )
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    uiState = uiState.copy(
+                        mensajeErrorWifi = "Error al enviar comando Wi-Fi: ${e.localizedMessage}"
+                    )
+                }
+            }
+        }
     }
 
     fun setReconexionAutomatica(activar: Boolean) {

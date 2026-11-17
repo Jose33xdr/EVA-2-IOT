@@ -96,7 +96,7 @@ fun ConexionScreen(
 
             // Contenido según la pestaña activa
             when (uiState.pestanaActiva) {
-                0 -> PestanaWifiCloud()
+                0 -> PestanaWifiCloud(conexionViewModel, uiState)
                 1 -> PestanaBluetooth(conexionViewModel, uiState)
                 2 -> PestanaGuia()
             }
@@ -105,7 +105,7 @@ fun ConexionScreen(
 }
 
 @Composable
-private fun PestanaWifiCloud() {
+private fun PestanaWifiCloud(viewModel: ConexionViewModel, uiState: ConexionUiState) {
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -119,14 +119,14 @@ private fun PestanaWifiCloud() {
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "📡 Control por Wi-Fi y Firebase Firestore",
+                        text = "📡 Conexión Directa Wi-Fi (IP del ESP32)",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = AccentGreen
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "El ESP32 se conecta a tu red Wi-Fi y sincroniza en tiempo real con Firebase Firestore. Cuando la app enciende la bomba o cambia los umbrales, el ESP32 lo detecta instantáneamente.",
+                        text = "Introduce la dirección IP local asignada a tu ESP32 (por ejemplo, en el monitor serie al conectarse al Wi-Fi) para comunicarte y controlar la bomba de agua directamente por red local.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onBackground
                     )
@@ -135,8 +135,131 @@ private fun PestanaWifiCloud() {
         }
 
         item {
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = BackgroundSecondary)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedTextField(
+                        value = uiState.ipEsp32,
+                        onValueChange = { viewModel.setIpEsp32(it) },
+                        label = { Text("IP del ESP32 (ej: 192.168.1.50)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Button(
+                            onClick = { viewModel.conectarYLeerWifi() },
+                            enabled = !uiState.cargandoWifi,
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen)
+                        ) {
+                            if (uiState.cargandoWifi) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onPrimary
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                            }
+                            Text("Conectar y Leer")
+                        }
+                    }
+
+                    Text(
+                        text = "Estado: ${uiState.estadoConexionWifi}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (uiState.estadoConexionWifi.contains("200")) AccentGreen else MaterialTheme.colorScheme.onBackground
+                    )
+
+                    uiState.mensajeErrorWifi?.let { err ->
+                        Text(text = err, style = MaterialTheme.typography.bodySmall, color = ErrorRed)
+                    }
+
+                    // Live sensor readings card
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.background)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(text = "🌡️ Temperatura: ${uiState.temperaturaWifi}", style = MaterialTheme.typography.bodyMedium)
+                            Text(text = "💧 Humedad: ${uiState.humedadWifi}", style = MaterialTheme.typography.bodyMedium)
+                            Text(text = "⚙️ Bomba: ${uiState.bombaWifiEstado}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    // Actuator controls
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Button(
+                            onClick = { viewModel.enviarComandoWifi("bomba/on", "Bomba ON") },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen)
+                        ) {
+                            Text("Bomba ON")
+                        }
+                        Button(
+                            onClick = { viewModel.enviarComandoWifi("bomba/off", "Bomba OFF") },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = ErrorRed)
+                        ) {
+                            Text("Bomba OFF")
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
             Text(
-                text = "Código de Firmware para ESP32 (Arduino IDE):",
+                text = "Terminal Wi-Fi (HTTP RX / TX):",
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = BackgroundSecondary)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(150.dp)
+                        .padding(12.dp)
+                ) {
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        items(uiState.logsWifi) { log ->
+                            Text(
+                                text = log,
+                                style = MaterialTheme.typography.bodySmall.fontFamily(FontFamily.Monospace),
+                                color = MaterialTheme.colorScheme.onBackground
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            Text(
+                text = "Código de Firmware WebServer para ESP32 (Arduino IDE):",
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.SemiBold
             )
@@ -155,11 +278,13 @@ private fun PestanaWifiCloud() {
                     Text(
                         text = """
 #include <WiFi.h>
-#include <HTTPClient.h>
+#include <WebServer.h>
 #include <DHT.h>
 
 const char* ssid = "TU_RED_WIFI";
 const char* password = "TU_PASSWORD_WIFI";
+
+WebServer server(80);
 
 #define DHTPIN 4
 #define DHTTYPE DHT11
@@ -167,9 +292,33 @@ DHT dht(DHTPIN, DHTTYPE);
 
 const int RELAY_BOMBA = 5;
 
+void handleRoot() {
+  float h = dht.readHumidity();
+  float t = dht.readTemperature();
+  String bomba = digitalRead(RELAY_BOMBA) == HIGH ? "ON" : "OFF";
+  
+  String json = "{";
+  json += "\"temperatura\":" + String(isnan(t) ? 0.0 : t) + ",";
+  json += "\"humedad\":" + String(isnan(h) ? 0.0 : h) + ",";
+  json += "\"bomba\":\"" + bomba + "\"";
+  json += "}";
+  server.send(200, "application/json", json);
+}
+
+void handleBombaOn() {
+  digitalWrite(RELAY_BOMBA, HIGH);
+  server.send(200, "text/plain", "BOMBA_ON_OK");
+}
+
+void handleBombaOff() {
+  digitalWrite(RELAY_BOMBA, LOW);
+  server.send(200, "text/plain", "BOMBA_OFF_OK");
+}
+
 void setup() {
   Serial.begin(115200);
   pinMode(RELAY_BOMBA, OUTPUT);
+  digitalWrite(RELAY_BOMBA, LOW);
   dht.begin();
 
   WiFi.begin(ssid, password);
@@ -178,16 +327,17 @@ void setup() {
     Serial.println("Conectando a WiFi...");
   }
   Serial.println("¡Conectado a WiFi!");
+  Serial.print("IP del ESP32: ");
+  Serial.println(WiFi.localIP());
+
+  server.on("/", handleRoot);
+  server.on("/bomba/on", handleBombaOn);
+  server.on("/bomba/off", handleBombaOff);
+  server.begin();
 }
 
 void loop() {
-  float h = dht.readHumidity();
-  float t = dht.readTemperature();
-  
-  if (!isnan(h) && !isnan(t)) {
-    Serial.printf("Temp: %.1f °C | Humedad: %.1f %%\n", t, h);
-  }
-  delay(5000);
+  server.handleClient();
 }
                         """.trimIndent(),
                         style = MaterialTheme.typography.bodySmall.copy(
