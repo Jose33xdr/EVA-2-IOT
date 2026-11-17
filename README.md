@@ -1,18 +1,20 @@
 # EVA-2-IOT
 
-Aplicación Android para monitoreo y control de riego/ventilación de plantas (IoT).
+Aplicación Android para monitoreo y control de riego de plantas (IoT).
 Proyecto de la Unidad 2 — Aplicaciones Móviles Android.
 
 ## Tecnologías
 - Kotlin + Jetpack Compose (Material 3), arquitectura MVVM, Navigation Compose
 - Firebase Authentication y Cloud Firestore
-- Servicio en primer plano (simulador de dispositivos ESP32) y notificaciones de alerta
+- Conectividad Bluetooth SPP para ESP32 / Arduino con reconexión automática inteligente
+- Servicio en primer plano (simulador de dispositivos ESP32) y notificaciones de alerta en tiempo real
 
 ## Funcionalidades
-- Registro, login seguro (bloqueo tras 5 intentos), recuperación de contraseña y sesión persistente
+- Registro, login seguro (bloqueo tras intentos fallidos), recuperación de contraseña y sesión persistente
 - Gestión de plantas con sensores asignables y umbrales configurables por planta
-- Control automático y manual de bomba de agua y ventilador
-- Alerta de temperatura con notificación y emergencia automática
+- Control automático y manual de bomba de agua
+- Alerta de temperatura con notificación emergente, vibración y protocolo de emergencia
+- Conexión Bluetooth SPP con búsqueda de dispositivos vinculados, permisos de tiempo de ejecución (Android 12+) y reconexión automática configurable
 - Roles usuario / administrador (usuarios, plantas, sensores, registros)
 
 ## Cómo ejecutar
